@@ -148,12 +148,6 @@ A sample `DemoApp` is included to test:
 
 ---
 
-## Credits
-
-Created and maintained by [@gayanthabishan](https://github.com/gayanthabishan)
-
----
-
 ## NavigationStackChildView
 
 `NavigationStackChildView` is a lightweight wrapper used to **defer rendering of its content** until after a short delay (default: 0.25 seconds). It’s particularly useful when pushing a new view to the stack, helping to ensure smoother navigation transitions.
