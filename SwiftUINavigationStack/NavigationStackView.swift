@@ -73,16 +73,14 @@ public struct NavigationStackView<Root>: View where Root: View {
         let navigationType = navigationStack.navigationType
 
         return ZStack {
-            Group {
-                if showRoot {
-                    rootView
-                        .transition(navigationType == .push ? transitions.push : transitions.pop)
-                        .environmentObject(navigationStack)
-                } else {
-                    navigationStack.currentView!.wrappedElement
-                        .transition(navigationType == .push ? transitions.push : transitions.pop)
-                        .environmentObject(navigationStack)
-                }
+            if showRoot {
+                rootView
+                    .transition(navigationType == .push ? transitions.push : transitions.pop)
+                    .environmentObject(navigationStack)
+            } else {
+                navigationStack.currentView!.build()
+                    .transition(navigationType == .push ? transitions.push : transitions.pop)
+                    .environmentObject(navigationStack)
             }
         }
     }

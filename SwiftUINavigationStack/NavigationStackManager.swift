@@ -73,8 +73,10 @@ public class NavigationStackManager: ObservableObject {
     public func push<Element: View>(_ element: Element, withId identifier: String? = nil) {
         navigationType = .push
         withAnimation(easing) {
-            viewStack.push(ViewElement(id: identifier ?? UUID().uuidString,
-                                       wrappedElement: AnyView(element)))
+            viewStack.push(ViewElement(
+                id: identifier ?? UUID().uuidString,
+                build: { AnyView(element) }
+            ))
         }
     }
 
@@ -92,8 +94,33 @@ public class NavigationStackManager: ObservableObject {
             }
         }
     }
-}
+    
+    /// Pops all views and returns to the root view with or without animation
+    /// usage : navigationStack.popToRoot(animated: false)
+    public func popToRoot(animated: Bool = true) {
+        navigationType = .pop
+        if animated {
+            withAnimation(easing) {
+                viewStack.popToRoot()
+            }
+        } else {
+            viewStack.popToRoot()
+        }
+    }
 
+    /// Replace the top view with a new one.
+    /// usage : navigationStack.replace(HomeView(), withId: "Home")
+    public func replace<Element: View>(_ element: Element, withId identifier: String? = nil) {
+        navigationType = .push
+        withAnimation(easing) {
+            _ = viewStack.popLast() // remove current top
+            viewStack.push(ViewElement(
+                id: identifier ?? UUID().uuidString,
+                build: { AnyView(element) }
+            ))
+        }
+    }
+}
 
 /// A lightweight stack that manages the order of screens.
 private struct ViewStack {
@@ -143,15 +170,18 @@ private struct ViewStack {
             $0.id == identifier
         }
     }
+    
+    /// Removes and returns the top view from the stack, if any.
+    mutating func popLast() -> ViewElement? {
+        return views.popLast()
+    }
 }
 
-/// A wrapper for any SwiftUI view that’s stored in the navigation stack.
-struct ViewElement: Identifiable, Equatable {
-    let id: String
-    let wrappedElement: AnyView
-
-    /// Two views are equal if their IDs match.
-    static func == (lhs: ViewElement, rhs: ViewElement) -> Bool {
+///// A wrapper for any SwiftUI view that’s stored in the navigation stack.
+public struct ViewElement: Identifiable, Equatable {
+    public let id: String
+    public let build: () -> AnyView
+    public static func == (lhs: ViewElement, rhs: ViewElement) -> Bool {
         lhs.id == rhs.id
     }
 }
