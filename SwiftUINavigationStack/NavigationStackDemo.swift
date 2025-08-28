@@ -16,13 +16,18 @@ import SwiftUI
 // MARK: - App Entry
 
 public struct NavigationStackDemo: View {
-    
-    public init(){}
-    
+    @StateObject private var navigationStack = NavigationStackManager()
+
+    public init() {}
+
     public var body: some View {
-        NavigationStackView {
-            HomeScreen()
-        }
+        NavigationStackView(
+            navigationStack: navigationStack,
+            rootView: Group {
+                HomeScreen()
+            }
+        )
+        .environmentObject(navigationStack)
     }
 }
 
@@ -32,17 +37,20 @@ struct HomeScreen: View {
     @EnvironmentObject var nav: NavigationStackManager
 
     var body: some View {
-        VStack(spacing: 16) {
-            Text("🏠 Home Screen")
-                .font(.title)
+        ZStack {
+            VStack(spacing: 16) {
+                Text("🏠 Home Screen")
+                    .font(.title)
 
-            Button("Push First View") {
-                nav.push(FirstScreen(), withId: "FirstScreen")
+                Button("Push First View") {
+                    nav.push(FirstScreen(), withId: "FirstScreen")
+                }
+
+                Text("Stack depth: \(nav.depth)")
             }
-
-            Text("Stack depth: \(nav.depth)")
+            .padding()
         }
-        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -52,21 +60,26 @@ struct FirstScreen: View {
     @EnvironmentObject var nav: NavigationStackManager
 
     var body: some View {
-        VStack(spacing: 16) {
-            Text("1️⃣ First Screen")
-                .font(.title)
+        NavigationStackChildView {
+            ZStack {
+                VStack(spacing: 16) {
+                    Text("1️⃣ First Screen")
+                        .font(.title)
 
-            Button("Push Second View") {
-                nav.push(SecondScreen(), withId: "SecondScreen")
+                    Button("Push Second View") {
+                        nav.push(SecondScreen(), withId: "SecondScreen")
+                    }
+
+                    Button("Back to Previous") {
+                        nav.pop()
+                    }
+
+                    Text("Stack depth: \(nav.depth)")
+                }
+                .padding()
             }
-
-            Button("Back to Previous") {
-                nav.pop()
-            }
-
-            Text("Stack depth: \(nav.depth)")
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .padding()
     }
 }
 
@@ -76,25 +89,30 @@ struct SecondScreen: View {
     @EnvironmentObject var nav: NavigationStackManager
 
     var body: some View {
-        VStack(spacing: 16) {
-            Text("2️⃣ Second Screen")
-                .font(.title)
+        NavigationStackChildView {
+            ZStack {
+                VStack(spacing: 16) {
+                    Text("2️⃣ Second Screen")
+                        .font(.title)
 
-            Button("Push Final View") {
-                nav.push(FinalScreen(), withId: "FinalScreen")
+                    Button("Push Final View") {
+                        nav.push(FinalScreen(), withId: "FinalScreen")
+                    }
+
+                    Button("Back to First") {
+                        nav.popToView(withId: "FirstScreen")
+                    }
+
+                    Button("Back to Previous") {
+                        nav.pop()
+                    }
+
+                    Text("Stack depth: \(nav.depth)")
+                }
+                .padding()
             }
-
-            Button("Back to First") {
-                nav.pop(to: .view(withId: "FirstScreen"))
-            }
-
-            Button("Back to Previous") {
-                nav.pop()
-            }
-
-            Text("Stack depth: \(nav.depth)")
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .padding()
     }
 }
 
@@ -105,25 +123,28 @@ struct FinalScreen: View {
 
     var body: some View {
         NavigationStackChildView {
-            VStack(spacing: 16) {
-                Text("🏁 Final Screen")
-                    .font(.title)
+            ZStack {
+                VStack(spacing: 16) {
+                    Text("🏁 Final Screen")
+                        .font(.title)
 
-                Button("Back to Root") {
-                    nav.pop(to: .root)
+                    Button("Back to Root") {
+                        nav.popToRoot()
+                    }
+
+                    Button("Back to First") {
+                        nav.popToView(withId: "SecondScreen")
+                    }
+
+                    Button("Back to Second") {
+                        nav.pop()
+                    }
+
+                    Text("Stack depth: \(nav.depth)")
                 }
-
-                Button("Back to Second") {
-                    nav.pop(to: .view(withId: "SecondScreen"))
-                }
-
-                Button("Back to Previous") {
-                    nav.pop()
-                }
-
-                Text("Stack depth: \(nav.depth)")
+                .padding()
             }
-            .padding()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .onAppear {
                 print("Current stack depth: \(nav.depth)")
                 print("Stack contains 'FirstScreen'? \(nav.containsView(withId: "FirstScreen"))")

@@ -11,27 +11,45 @@
 //  Helps ensure smoother push/pop animations by deferring UI updates
 //  until the transition has completed.
 //
+/**
+ ===================================================================
+ Transition-Optimized View Loader:
+ -------------------------------------------------------------------
+ Utility view that delays rendering to ensure smooth push/pop transitions.
+ Prevents rendering glitches during animation.
+ ===================================================================
+
+ Overview:
+ Helps polish navigation animations in custom stacks.
+
+ Responsibilities:
+ - Defers view appearance using a configurable `delay`
+ - Prevents premature layout during navigation transitions
+ - Ideal for wrapping views pushed onto the stack
+ - With the updated NavigationStackView keeping non-top screens mounted,
+   this helper is optional in many screens. You can still use it on heavy
+   detail screens (maps, large grids) to slightly defer layout until the
+   push completes. Keep delays small for responsiveness.
+ */
 
 import SwiftUI
 
-/// A wrapper that waits before showing its content, giving time for navigation animations to finish.
-struct NavigationStackChildView<Content: View>: View {
-    @EnvironmentObject private var navigationStack: NavigationStackManager
+///// A wrapper that waits before showing its content, giving time for navigation animations to finish.
+public struct NavigationStackChildView<Content: View>: View {
+    private let delay: TimeInterval
+    private let content: () -> Content
+
     @State private var shouldRender = false
 
-    let delay: TimeInterval
-    let content: () -> Content
-
-    /// Create a view that shows its content after a short wait (default is 0.25s).
-    init(
-        delay: TimeInterval = 0.25,
-        @ViewBuilder content: @escaping () -> Content
-    ) {
+    /// - Parameters:
+    ///   - delay: Small delay to avoid competing with the transition (default 0.05s).
+    ///   - content: The content view to load after the delay.
+    public init(delay: TimeInterval = 0.25, @ViewBuilder content: @escaping () -> Content) {
         self.delay = delay
         self.content = content
     }
 
-    var body: some View {
+    public var body: some View {
         Group {
             if shouldRender {
                 content()

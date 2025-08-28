@@ -11,170 +11,217 @@
 //  and applying animated transitions. Works in conjunction with NavigationStackView
 //  to provide a fully programmatic and customizable navigation experience.
 //
+/**
+ ===================================================================
+ Core Navigation Engine:
+ -------------------------------------------------------------------
+ This file defines the central logic for managing a custom navigation stack.
+ Changes here will affect all stack-based navigation behaviors.
+ Proceed with caution.
+ ===================================================================
+
+ Overview:
+ A core component of the custom SwiftUI navigation system.
+
+ Responsibilities:
+ - Manages  internal LIFO stack of views using `ViewElement`
+ - Provides push, pop, replace, and popToRoot operations
+ - Tracks direction of navigation via `NavigationType`
+ - Applies smooth animated transitions using custom easing
+ - Serves as the data source for `NavigationStackView`
+ -
+    * Exposes a read-only snapshot of the *entire* stack so
+      NavigationStackView can render all screens at once and only
+      fade/hit-test the top. This mirrors UINavigationController’s
+      “keep view controllers alive” behavior to avoid UI re-renders
+      and scroll resets on pop.
+ */
 
 import SwiftUI
 
-/// Tracks whether you're moving forward or backward in navigation.
-enum NavigationType {
+/// Direction of the last navigation operation. Used to pick push vs pop transitions.
+public enum NavigationType {
     case push
     case pop
 }
 
-/// Tells the stack where to go when popping a view.
-public enum PopDestination {
-    /// Go back one step.
+/// High-level navigation targets (kept for completeness; you may already be using this).
+public enum NavigationTarget {
+    /// Go back one screen.
     case previous
-
     /// Jump  to the root screen.
     case root
-
     /// Go back to a view with a specific ID.
     case view(withId: String)
 }
 
-/**
- Controls how screens are stacked and switched.
+/// Central observable object driving the custom navigation.
+public final class NavigationStackManager: ObservableObject {
 
- This is the engine behind `NavigationStackView`, and lets you handle navigation manually.
+    // MARK: - Published state
 
- It’s automatically available in any `NavigationStackView`, or you can pass it in yourself.
-*/
-public class NavigationStackManager: ObservableObject {
+    /// The element currently visible on top of the stack (nil == root).
+    @Published public private(set) var currentView: ViewElement? = nil
 
+    /// The last navigation direction (.push / .pop) to drive transitions.
+    @Published public private(set) var navigationType: NavigationType = .push
+    
     /// Default speed and curve used when switching screens.
-    public static let defaultEasing = Animation.easeOut(duration: 0.2)
+    public var animation: Animation { Animation.easeInOut(duration: 0.35) }
 
-    @Published var currentView: ViewElement?
-    @Published private(set) var navigationType = NavigationType.push
-    private let easing: Animation
-
-    /// Sets up the stack manager with a default or custom animation speed.
-    public init(easing: Animation = defaultEasing) {
-        self.easing = easing
-    }
-
+    // NOTE: We purposely keep the underlying stack private and immutable from outside
+    // to guarantee invariants and avoid accidental mutations.
     private var viewStack = ViewStack() {
         didSet {
-            currentView = viewStack.peek()
+            // Keep published state in sync.
+            self.currentView = viewStack.peek()
+            // (We do not publish the whole array here to preserve the existing API surface.
+            //  The view layer fetches a snapshot via allStackedViews() when needed.)
         }
     }
 
-    /// Shows how many screens are currently in the stack.
-    public var depth: Int {
-        viewStack.depth
-    }
-
-    /// Checks if a screen with a specific ID already exists in the stack.
-    public func containsView(withId id: String) -> Bool {
-        viewStack.indexForView(withId: id) != nil
-    }
-
-    /// Push a new screen onto the stack.
-    public func push<Element: View>(_ element: Element, withId identifier: String? = nil) {
+    /// Push a new view on top of the stack.
+    @MainActor
+    public func push<V: View>(_ view: V, withId identifier: String? = nil) {
         navigationType = .push
-        withAnimation(easing) {
-            viewStack.push(ViewElement(
-                id: identifier ?? UUID().uuidString,
-                build: { AnyView(element) }
-            ))
+        let id = identifier ?? UUID().uuidString
+        let element = ViewElement(id: id) { AnyView(view) }
+        
+        withAnimation(animation) {
+            viewStack.push(element)
+            objectWillChange.send()
         }
     }
 
-    /// Go back in the stack based on where you want to return.
-    public func pop(to: PopDestination = .previous) {
+    /// Replace the current top view with another (does not change stack depth).
+    @MainActor
+    public func replace<V: View>(_ view: V, withId identifier: String? = nil) {
+        navigationType = .push
+        let id = identifier ?? UUID().uuidString
+        let element = ViewElement(id: id) { AnyView(view) }
+        withAnimation(animation) {
+            viewStack.replaceTop(with: element)
+            objectWillChange.send()
+        }
+    }
+
+    /// Pop back a single level if possible.
+    @MainActor
+    public func pop(withAnimation animate: Bool = true) {
+        guard !viewStack.isEmpty else { return }
         navigationType = .pop
-        withAnimation(easing) {
-            switch to {
-            case .root:
-                viewStack.popToRoot()
-            case .view(let viewId):
-                viewStack.popToView(withId: viewId)
-            default:
-                viewStack.popToPrevious()
-            }
+        let mutate = {
+            _ = self.viewStack.popLast()
+            self.objectWillChange.send()
+        }
+        if animate {
+            withAnimation(animation) { mutate() }
+        } else {
+            mutate()
+        }
+    }
+
+    /// Pop all the way back to root.
+    @MainActor
+    public func popToRoot(withAnimation animate: Bool = true) {
+        guard !viewStack.isEmpty else { return }
+        navigationType = .pop
+        let mutate = {
+            self.viewStack.removeAll()
+            self.objectWillChange.send()
+        }
+        if animate {
+            withAnimation(animation) { mutate() }
+        } else {
+            mutate()
+        }
+    }
+
+    /// Pop back to a specific view id if it exists in the stack.
+    @MainActor
+    public func popToView(withId id: String, withAnimation animate: Bool = true) {
+        guard viewStack.contains(id: id) else { return }
+        navigationType = .pop
+        let mutate = {
+            self.viewStack.removeUntil(including: id)
+            self.objectWillChange.send()
+        }
+        if animate {
+            withAnimation(animation) { mutate() }
+        } else {
+            mutate()
         }
     }
     
-    /// Pops all views and returns to the root view with or without animation
-    /// usage : navigationStack.popToRoot(animated: false)
-    public func popToRoot(animated: Bool = true) {
+    /// Remove *all* views from the stack and drop hooks/resources.
+    @MainActor
+    public func resetAll() {
         navigationType = .pop
-        if animated {
-            withAnimation(easing) {
-                viewStack.popToRoot()
-            }
-        } else {
-            viewStack.popToRoot()
-        }
+        viewStack.removeAll()
+        currentView = nil
+        objectWillChange.send()
     }
 
-    /// Replace the top view with a new one.
-    /// usage : navigationStack.replace(HomeView(), withId: "Home")
-    public func replace<Element: View>(_ element: Element, withId identifier: String? = nil) {
-        navigationType = .push
-        withAnimation(easing) {
-            _ = viewStack.popLast() // remove current top
-            viewStack.push(ViewElement(
-                id: identifier ?? UUID().uuidString,
-                build: { AnyView(element) }
-            ))
-        }
+    /// Current depth (0 means root currently visible).
+    public var depth: Int { viewStack.count }
+    
+    /// Checks if a screen with a specific ID already exists in the stack.
+    public func containsView(withId id: String) -> Bool {
+        allStackedViews().contains { $0.id == id }
+    }
+
+    /**
+     Returns a read-only snapshot of the *entire* stack, from bottom to top.
+     - The view layer (NavigationStackView) uses this to render all screens at once,
+       keeping non-top screens mounted to preserve scroll offsets and local state.
+     - We intentionally return a fresh array to avoid exposing internal mutability.
+     */
+    public func allStackedViews() -> [ViewElement] {
+        viewStack.viewsSnapshot()
     }
 }
 
-/// A lightweight stack that manages the order of screens.
+// MARK: - Internal LIFO container
+
 private struct ViewStack {
-    private var views = [ViewElement]()
+    private var views: [ViewElement] = []
 
-    /// Returns the top view on the stack, if any.
-    func peek() -> ViewElement? {
-        views.last
+    var count: Int { views.count }
+    var isEmpty: Bool { views.isEmpty }
+
+    func peek() -> ViewElement? { views.last }
+
+    mutating func push(_ view: ViewElement) {
+        views.append(view)
     }
 
-    /// Gives the total number of views in the stack.
-    var depth: Int {
-        views.count
-    }
-
-    /// Adds a new view to the top of the stack, if its ID isn’t already present.
-    mutating func push(_ element: ViewElement) {
-        guard indexForView(withId: element.id) == nil else {
-            print("warning : view with id \"\(element.id)\" exists in the stack")
-            return
+    mutating func replaceTop(with view: ViewElement) {
+        if !views.isEmpty {
+            _ = views.popLast()
         }
-        views.append(element)
+        views.append(view)
     }
 
-    /// Removes just the last view from the stack.
-    mutating func popToPrevious() {
-        _ = views.popLast()
+    mutating func removeAll() { views.removeAll() }
+
+    func contains(id: String) -> Bool {
+        views.contains(where: { $0.id == id })
     }
 
-    /// Pops views until the specified view ID is at the top.
-    mutating func popToView(withId identifier: String) {
-        guard let viewIndex = indexForView(withId: identifier) else {
-            print("No view with the ID \"\(identifier)\".")
-            return
-        }
-        views.removeLast(views.count - (viewIndex + 1))
-    }
-
-    /// Clears all views from the stack.
-    mutating func popToRoot() {
-        views.removeAll()
-    }
-
-    /// Looks up a view’s position in the stack by its ID.
-    func indexForView(withId identifier: String) -> Int? {
-        views.firstIndex {
-            $0.id == identifier
+    /// Removes elements until `id` is on top (inclusive).
+    mutating func removeUntil(including id: String) {
+        if let index = views.lastIndex(where: { $0.id == id }) {
+            views.removeSubrange(index..<views.endIndex)
         }
     }
-    
+
     /// Removes and returns the top view from the stack, if any.
     mutating func popLast() -> ViewElement? {
         return views.popLast()
     }
+    
+    /// Returns a copy of the current stack (bottom..top). Non-mutating.
+    func viewsSnapshot() -> [ViewElement] { views }
 }
 
 ///// A wrapper for any SwiftUI view that’s stored in the navigation stack.
@@ -184,4 +231,11 @@ public struct ViewElement: Identifiable, Equatable {
     public static func == (lhs: ViewElement, rhs: ViewElement) -> Bool {
         lhs.id == rhs.id
     }
+
+    // Convenience init to keep call sites tidy.
+    public init(id: String, build: @escaping () -> AnyView) {
+        self.id = id
+        self.build = build
+    }
 }
+
